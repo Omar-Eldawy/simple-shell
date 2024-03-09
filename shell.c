@@ -9,8 +9,9 @@
 
 #define TOKEN_SIZE 20
 
-void setUpParentProcess(char *tokens[TOKEN_SIZE]);
-void getInputFromUser(char *tokens[TOKEN_SIZE ]);
+
+void setUpParentProcess(char *tokens[TOKEN_SIZE], int *runInBackground);
+void getInputFromUser(char *tokens[TOKEN_SIZE], int *runInBackground);
 void splitInput(char *input, char *tokens[TOKEN_SIZE ]);
 void handlingDollarSign(char *tokens[TOKEN_SIZE ]);
 int executeCommand(char *tokens[TOKEN_SIZE ]);
@@ -27,21 +28,23 @@ void setEnvironmentVariable(char *variables[2]);
 void concatenateString(char *string[TOKEN_SIZE]);
 void removeQuotes(char *string);
 void shiftStringOneStepBackWards(char *string);
+void handlingDollarSign2(char *token);
 
 int main(){
     char *tokens[TOKEN_SIZE];
     system("clear");
     while(1) {
-        getInputFromUser(tokens);
+        int runInBackground = 0;
+        getInputFromUser(tokens, &runInBackground);
         int flag = executeCommand(tokens);
         if (flag){
             continue;
         }
-        setUpParentProcess(tokens);
+        setUpParentProcess(tokens, &runInBackground);
     }
 }
 
-void setUpParentProcess(char *tokens[5]){
+void setUpParentProcess(char *tokens[5], int *runInBackground){
     pid_t pid;
     pid = fork();
     if(pid == -1){
@@ -55,19 +58,47 @@ void setUpParentProcess(char *tokens[5]){
     else{
         //parent process
         int status;
-        waitpid(pid,&status,0);
+        if(*runInBackground == 0) {
+            waitpid(pid, &status, 0);
+        }
     }
 }
 
-void getInputFromUser(char *tokens[5]){
+void getInputFromUser(char *tokens[5], int *runInBackground){
     char input [PATH_MAX];
     char currentDirectory [PATH_MAX];
     if (getcwd(currentDirectory, sizeof(currentDirectory)) != NULL){
-        sleep_ms(20);
+        sleep_ms(30);
         printf("%s:", currentDirectory);
         fgets(input, sizeof(input),stdin);
+        if(input[strlen(input) - 2] == '&'){
+            *runInBackground = 1;
+            input[strlen(input) - 3] = '\0';
+        }
+        for (int j = 0; input[j] != '\0'; j++) {
+            if (input[j] == '$') {
+                char *beforeDollarSign = strndup(input, j);
+                char envVariableName[2] = {input[j + 1], '\0'}; // Take only the first character after $
+                int removedQuotation = 0;
+                if (input[strlen(input) - 2] == '\"') {
+                    removedQuotation = 1;
+                }
+                char *envVariableValue = getenv(envVariableName);
+                if (envVariableValue != NULL) {
+                    char *newToken = malloc(strlen(beforeDollarSign) + strlen(envVariableValue) + 1);
+                    strcpy(newToken, beforeDollarSign);
+                    strcat(newToken, envVariableValue);
+                    if (removedQuotation) {
+                        strcat(newToken, "\"");
+                    }
+                    strcpy(input, newToken);
+                } else {
+                    printf("Error in getting environment variable\n");
+                }
+                free(beforeDollarSign);
+            }
+        }
         splitInput(input, tokens);
-        handlingDollarSign(tokens);
     }
     else{
         perror("Error in getting current directory");
@@ -82,7 +113,7 @@ void handlingDollarSign(char *tokens[TOKEN_SIZE]) {
                 char *envVariableName = strdup(token + j + 1);
                 int removedQuotation = 0;
                 if (envVariableName[strlen(envVariableName) - 1] == '"') {
-                    envVariableName[strlen(envVariableName) - 1] = '\0';
+//                    envVariableName[strlen(envVariableName) - 1] = '\0';
                     removedQuotation = 1;
                 }
                 char *envVariableValue = getenv(envVariableName);
@@ -104,7 +135,7 @@ void handlingDollarSign(char *tokens[TOKEN_SIZE]) {
     }
 }
 
-void splitInput(char *input, char *tokens[TOKEN_SIZE ]){
+void splitInput(char *input, char *tokens[TOKEN_SIZE]){
     char *token;
     int count = 0;
     token = strtok(input, " \n");
@@ -190,11 +221,13 @@ void printWorkingDirectory(){
 void exportVariable(char *string [TOKEN_SIZE]){
     char *variables[2];
     int afterEqual = getFirstEqualSign(string[1]);
+    //string without spaces
     if(afterEqual == 0){
         splitOnEqual(string, variables);
         setEnvironmentVariable(variables);
         return;
     }
+    //string inside quotes
     else if(afterEqual == 1) {
         int flag = checkQuotes(string);
         if (flag == 0) {
@@ -205,6 +238,11 @@ void exportVariable(char *string [TOKEN_SIZE]){
         removeQuotes(string[1]);
         splitOnEqual(string, variables);
         shiftStringOneStepBackWards(variables[1]);
+        int i = strlen(variables[1])-1;
+        while(variables[1][i] != ' '){
+            i++;
+        }
+        variables[1][i] = '\0';
         setEnvironmentVariable(variables);
         return;
         }
@@ -222,7 +260,6 @@ void echo(char *tokens[TOKEN_SIZE]){
     else{
         for(int i = 1; tokens[i] != NULL; i++){
             removeQuotes(tokens[i]);
-            shiftStringOneStepBackWards(tokens[i]);
         }
     }
     for(int i = 1; tokens[i] != NULL; i++){
@@ -231,11 +268,6 @@ void echo(char *tokens[TOKEN_SIZE]){
     printf("\n");
 }
 void executeExternalCommand(char *tokens[5]){
-    int i = 0;
-    while(tokens[i] != NULL){
-        printf("%s\n", tokens[i]);
-        i++;
-    }
     execvp(tokens[0], tokens);
     perror("Error in executing command");
     exit(1);
@@ -327,5 +359,32 @@ void shiftStringOneStepBackWards(char *string){
     while(string[i] != '\0'){
         string[i] = string[i+1];
         i++;
+    }
+}
+void handlingDollarSign2(char *token){
+    for (int j = 0; token[j] != '\0'; j++) {
+        if (token[j] == '$') {
+            char *beforeDollarSign = strndup(token, j);
+            char *envVariableName = strdup(token + j + 1);
+            int removedQuotation = 0;
+            if (envVariableName[strlen(envVariableName) - 2] == '\"') {
+                envVariableName[strlen(envVariableName) - 2] = '\0';
+                removedQuotation = 1;
+            }
+            char *envVariableValue = getenv(envVariableName);
+            if (envVariableValue != NULL) {
+                char *newToken = malloc(strlen(beforeDollarSign) + strlen(envVariableValue) + 1);
+                strcpy(newToken, beforeDollarSign);
+                strcat(newToken, envVariableValue);
+                if (removedQuotation) {
+                    strcat(newToken, "\"");
+                }
+                token = newToken;
+            } else {
+                printf("Error in getting environment variable\n");
+            }
+            free(beforeDollarSign);
+            free(envVariableName);
+        }
     }
 }
