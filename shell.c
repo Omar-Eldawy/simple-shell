@@ -9,7 +9,6 @@
 
 #define TOKEN_SIZE 20
 
-
 void setUpParentProcess(char *tokens[TOKEN_SIZE], int *runInBackground);
 void getInputFromUser(char *tokens[TOKEN_SIZE], int *runInBackground);
 void splitInput(char *input, char *tokens[TOKEN_SIZE ]);
@@ -29,6 +28,7 @@ void concatenateString(char *string[TOKEN_SIZE]);
 void removeQuotes(char *string);
 void shiftStringOneStepBackWards(char *string);
 void handlingDollarSign2(char *token);
+void sigchld_handler(int signum);
 
 int main(){
     char *tokens[TOKEN_SIZE];
@@ -44,22 +44,22 @@ int main(){
     }
 }
 
-void setUpParentProcess(char *tokens[5], int *runInBackground){
+void setUpParentProcess(char *tokens[5], int *runInBackground) {
+    signal(SIGCHLD, sigchld_handler);
     pid_t pid;
     pid = fork();
-    if(pid == -1){
+    if (pid == -1) {
         printf("Error in forking the process");
         exit(1);
-    }
-    else if (pid ==0){
+    } else if (pid == 0) {
         //child process
         executeExternalCommand(tokens);
-    }
-    else{
+    } else {
         //parent process
         int status;
-        if(*runInBackground == 0) {
+        if (*runInBackground == 0) {
             waitpid(pid, &status, 0);
+
         }
     }
 }
@@ -178,12 +178,7 @@ int executeCommand(char *tokens[TOKEN_SIZE ]){
 
 void changeDirectory(char *path) {
     char resolvedPath[PATH_MAX];
-    if (strcmp(path, "..") == 0) {
-        if (chdir("..") != 0) {
-            perror("chdir() error");
-            return;
-        }
-    } else if (strcmp(path, "~") == 0) {
+    if (path == NULL || strcmp(path, "~") == 0) {
         const char *homeDir = getenv("HOME");
         if (homeDir == NULL) {
             fprintf(stderr, "HOME environment variable not set\n");
@@ -193,7 +188,19 @@ void changeDirectory(char *path) {
             perror("chdir() error");
             return;
         }
-    } else {
+    } else if (strcmp(path, "..") == 0) {
+        if (chdir("..") != 0) {
+            perror("chdir() error");
+            return;
+        }
+    }
+    else if (strcmp(path, ".")==0) {
+        if (chdir(".") != 0) {
+            perror("chdir() error");
+            return;
+        }
+    }
+    else {
         if (realpath(path, resolvedPath) == NULL) {
             if (chdir(path) != 0) {
                 perror("chdir() error");
@@ -387,4 +394,21 @@ void handlingDollarSign2(char *token){
             free(envVariableName);
         }
     }
+}
+void sigchld_handler(int signum) {
+    FILE *logFile;
+    logFile = fopen("logfile.txt", "a");
+    if (logFile == NULL) {
+        perror("Error opening log file");
+        exit(EXIT_FAILURE);
+    }
+    time_t current_time;
+    current_time = time(NULL);
+
+    if (current_time == ((time_t)-1)) {
+        perror("time");
+    }
+        // Append the log message to the log file
+        fprintf(logFile, "Child process was terminated at %s.\n",ctime(&current_time));
+        fclose(logFile);
 }
