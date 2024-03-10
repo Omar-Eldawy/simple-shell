@@ -29,6 +29,7 @@ void removeQuotes(char *string);
 void shiftStringOneStepBackWards(char *string);
 void handlingDollarSign2(char *token);
 void sigchld_handler(int signum);
+void reapZombieProcesses(int signum);
 
 int main(){
     char *tokens[TOKEN_SIZE];
@@ -45,7 +46,7 @@ int main(){
 }
 
 void setUpParentProcess(char *tokens[5], int *runInBackground) {
-    signal(SIGCHLD, sigchld_handler);
+    signal(SIGCHLD, reapZombieProcesses);
     pid_t pid;
     pid = fork();
     if (pid == -1) {
@@ -59,7 +60,9 @@ void setUpParentProcess(char *tokens[5], int *runInBackground) {
         int status;
         if (*runInBackground == 0) {
             waitpid(pid, &status, 0);
-
+        }
+        else{
+            waitpid(pid, &status, WNOHANG);
         }
     }
 }
@@ -409,6 +412,13 @@ void sigchld_handler(int signum) {
         perror("time");
     }
         // Append the log message to the log file
-        fprintf(logFile, "Child process was terminated at %s.\n",ctime(&current_time));
+        fprintf(logFile, "Child process %d was terminated at %s.\n",signum,ctime(&current_time));
         fclose(logFile);
+}
+void reapZombieProcesses(int signum) {
+    pid_t pid;
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        sigchld_handler(pid);
+    }
 }
